@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Pokémon Search App</title>
+
+  <style>
+    :root{
+      --bg:#f6f8fb;
+      --card:#fff;
+      --muted:#6b7280;
+      --accent:#ef4444;
+      --shadow: 0 6px 18px rgba(15,23,42,0.08);
+      font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+    }
+
+    body{
+      margin:0;
+      background: linear-gradient(180deg,#eef2ff 0%, var(--bg) 100%);
+      min-height:100vh;
+      color:#0f172a;
+      -webkit-font-smoothing:antialiased;
+      -moz-osx-font-smoothing:grayscale;
+      padding:28px;
+    }
+
+    .container{
+      max-width:1100px;
+      margin:0 auto;
+    }
+
+    header{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:16px;
+      margin-bottom:20px;
+    }
+
+    header h1{
+      margin:0;
+      font-size:20px;
+      letter-spacing:-0.2px;
+    }
+
+    .controls{
+      display:flex;
+      gap:12px;
+      align-items:center;
+    }
+
+    .search {
+      display:flex;
+      align-items:center;
+      background:var(--card);
+      padding:8px 12px;
+      border-radius:12px;
+      box-shadow:var(--shadow);
+      min-width:280px;
+    }
+
+    .search input{
+      border:0;
+      outline:0;
+      font-size:14px;
+      background:transparent;
+      width:260px;
+    }
+
+    .count {
+      color:var(--muted);
+      font-size:13px;
+    }
+
+    .grid{
+      display:grid;
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap:16px;
+      margin-top:20px;
+    }
+
+    .card{
+      background:var(--card);
+      border-radius:14px;
+      padding:12px;
+      text-align:center;
+      box-shadow:var(--shadow);
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+      align-items:center;
+      transition:transform .14s ease;
+    }
+
+    .card:hover{ transform: translateY(-6px); }
+
+    .poke-img{
+      width:96px;
+      height:96px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+    }
+
+    .poke-img img{
+      max-width:100%;
+      max-height:100%;
+      image-rendering: pixelated;
+    }
+
+    .poke-name{
+      text-transform:capitalize;
+      font-weight:600;
+      font-size:14px;
+    }
+
+    .no-results{
+      text-align:center;
+      color:var(--muted);
+      margin-top:36px;
+    }
+
+    .loader{
+      display:flex;
+      align-items:center;
+      gap:10px;
+      color:var(--muted);
+      font-size:14px;
+    }
+
+    .spinner{
+      width:18px;
+      height:18px;
+      border-radius:50%;
+      border:3px solid rgba(0,0,0,0.08);
+      border-top-color:var(--accent);
+      animation:spin 0.9s linear infinite;
+    }
+
+    @keyframes spin{to{transform:rotate(360deg);}}
+
+    footer{
+      margin-top:28px;
+      color:var(--muted);
+      font-size:13px;
+    }
+
+    /* Responsive tweaks */
+    @media (max-width:480px){
+      .search input{ width:150px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Pokémon Search App</h1>
+      <div class="controls">
+        <div class="search" role="search" aria-label="Search Pokémon">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M21 21l-4.35-4.35" stroke="#6b7280" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <circle cx="11" cy="11" r="6" stroke="#6b7280" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <input id="searchInput" placeholder="Search Pokémon by name..." aria-label="Search Pokémon by name" />
+        </div>
+
+        <div class="count" id="countLabel">Loading...</div>
+      </div>
+    </header>
+
+    <main>
+      <div id="statusTop" class="loader" aria-live="polite" style="display:flex;">
+        <div class="spinner" aria-hidden="true"></div>
+        <div id="statusText">Fetching Pokémon list…</div>
+      </div>
+
+      <section id="pokemonGrid" class="grid" aria-live="polite" style="margin-top:12px;"></section>
+
+      <div id="noResults" class="no-results" style="display:none;">No Pokémon matched your search.</div>
+    </main>
+
+    <footer>
+      Data from <a href="https://pokeapi.co" target="_blank" rel="noopener">PokéAPI</a>.
+    </footer>
+  </div>
+
+  <script>
+    // Configuration
+    const API_LIST = 'https://pokeapi.co/api/v2/pokemon?limit=200'; // as requested in task
+
+    // State
+    let allPokemon = []; // { name, image, id, types (optional) }
+    let filtered = [];
+
+    // DOM
+    const grid = document.getElementById('pokemonGrid');
+    const statusTop = document.getElementById('statusTop');
+    const statusText = document.getElementById('statusText');
+    const countLabel = document.getElementById('countLabel');
+    const searchInput = document.getElementById('searchInput');
+    const noResults = document.getElementById('noResults');
+
+    
+    function debounce(fn, wait = 150){
+      let t;
+      return (...args) => {
+        clearTimeout(t);
+        t = setTimeout(()=> fn.apply(this, args), wait);
+      };
+    }
+
+    
+    async function loadPokemon(){
+      try{
+        setStatus('Fetching Pokémon list…');
+        const res = await fetch(API_LIST);
+        if(!res.ok) throw new Error('Failed to fetch list: ' + res.status);
+        const json = await res.json();
+        const results = json.results || [];
+
+        setStatus(`Fetching ${results.length} Pokémon details (this may take a second)...`);
+
+        
+        const detailPromises = results.map(r =>
+          fetch(r.url)
+            .then(resp => {
+              if(!resp.ok) throw new Error('detail fetch failed');
+              return resp.json()
+            })
+            .catch(err => {
+              
+              console.warn('Failed to load', r.name, err);
+              return { name: r.name, id: null, sprites: { front_default: null }, types: [] };
+            })
+        );
+
+        const details = await Promise.all(detailPromises);
+
+        
+        allPokemon = details.map(d => ({
+          name: d.name || 'unknown',
+          id: d.id || null,
+          image: (d.sprites && d.sprites.front_default) ? d.sprites.front_default : null,
+          types: (d.types || []).map(t => t.type && t.type.name).filter(Boolean)
+        }));
+
+        filtered = allPokemon.slice();
+
+        setStatus(null); // hide
+        renderGrid(filtered);
+        updateCount();
+      }catch(err){
+        console.error(err);
+        setStatus('Error loading Pokémon. Open console for details.');
+        countLabel.textContent = 'Error';
+      }
+    }
+
+    function setStatus(msg){
+      if(!msg){
+        statusTop.style.display = 'none';
+        statusText.textContent = '';
+        return;
+      }
+      statusTop.style.display = 'flex';
+      statusText.textContent = msg;
+    }
+
+    function updateCount(){
+      countLabel.textContent = `${filtered.length} / ${allPokemon.length} shown`;
+    }
+
+    function renderGrid(items){
+      grid.innerHTML = '';
+      if(!items.length){
+        noResults.style.display = 'block';
+        updateCount();
+        return;
+      }
+      noResults.style.display = 'none';
+
+      // create cards
+      const frag = document.createDocumentFragment();
+      for(const p of items){
+        const card = document.createElement('article');
+        card.className = 'card';
+        card.setAttribute('tabindex', '0');
+        card.setAttribute('aria-label', p.name);
+
+        const imgWrap = document.createElement('div');
+        imgWrap.className = 'poke-img';
+
+        if(p.image){
+          const img = document.createElement('img');
+          img.src = p.image;
+          img.alt = p.name + ' sprite';
+          img.loading = 'lazy';
+          imgWrap.appendChild(img);
+        } else {
+          // placeholder if no sprite
+          imgWrap.textContent = 'No image';
+          imgWrap.style.color = '#9ca3af';
+          imgWrap.style.fontSize = '12px';
+        }
+
+        const name = document.createElement('div');
+        name.className = 'poke-name';
+        name.textContent = p.name;
+
+        // small subtitle with id and types (if available)
+        const meta = document.createElement('div');
+        meta.style.fontSize = '12px';
+        meta.style.color = 'var(--muted)';
+        meta.style.marginTop = '4px';
+        const idText = p.id ? `#${p.id}` : '';
+        const typesText = p.types && p.types.length ? ' • ' + p.types.join(', ') : '';
+        meta.textContent = idText + typesText;
+
+        card.appendChild(imgWrap);
+        card.appendChild(name);
+        card.appendChild(meta);
+
+        frag.appendChild(card);
+      }
+      grid.appendChild(frag);
+      updateCount();
+    }
+
+    // Realtime filter (no reload)
+    function handleSearch(e){
+      const q = (e.target.value || '').trim().toLowerCase();
+      if(!q){
+        filtered = allPokemon.slice();
+      } else {
+        filtered = allPokemon.filter(p => p.name.toLowerCase().includes(q));
+      }
+      renderGrid(filtered);
+    }
+
+    // Wire events
+    searchInput.addEventListener('input', debounce(handleSearch, 120));
+
+    // Kick off
+    loadPokemon();
+  </script>
+</body>
+</html>
